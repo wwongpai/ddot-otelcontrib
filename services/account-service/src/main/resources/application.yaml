@@ -1,0 +1,32 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: account-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# OTel SDK auto-configuration via the Spring Boot starter.
+# Exporter endpoints, service name, and resource attributes are intentionally
+# NOT set here — they are injected as environment variables in the K8s manifests
+# so the same image can run in any environment without a rebuild.
+otel:
+  instrumentation:
+    spring-web:
+      enabled: true
+    spring-webmvc:
+      enabled: true
+    logback-appender:
+      enabled: true

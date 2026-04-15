@@ -1,0 +1,67 @@
+datadog:
+  apiKeyExistingSecret: datadog-secret
+  appKeyExistingSecret: datadog-secret
+  site: datadoghq.com
+  clusterName: warach-otel-sdk-ddot
+
+  # The datadog/datadog chart v3.x bundles the Datadog Operator by default.
+  # We are using the plain Helm chart approach (not the operator CRD approach),
+  # so disable it here. Key confirmed from chart NOTES output.
+  operator:
+    enabled: false
+
+  # GKE COS: enables proper eBPF mounts (debugfs, tracefs, bpffs), capabilities
+  # (SYS_ADMIN, NET_ADMIN, SYS_PTRACE), and seccomp profile for system-probe.
+  providers:
+    gke:
+      cos: true
+
+  # Required for GKE COS: disables the default kernel headers paths lookup
+  # (COS nodes don't expose /usr/src kernel headers the standard way).
+  # Supported from Helm chart >= 3.0.1.
+  systemProbe:
+    enableDefaultKernelHeadersPaths: false
+
+  otelCollector:
+    enabled: true
+    ports:
+      - containerPort: 4317
+        hostPort: 4317
+        name: otel-grpc
+        protocol: TCP
+      - containerPort: 4318
+        hostPort: 4318
+        name: otel-http
+        protocol: TCP
+
+  apm:
+    portEnabled: true
+  processAgent:
+    enabled: true
+    processCollection: true
+  networkMonitoring:
+    enabled: true
+  serviceMonitoring:
+    enabled: true
+  orchestratorExplorer:
+    enabled: true
+  logs:
+    enabled: true
+    containerCollectAll: true
+  kubelet:
+    tlsVerify: false
+  tags:
+    - "cluster:warach-otel-sdk-ddot"
+    - "env:otel-demo"
+
+clusterAgent:
+  enabled: true
+  replicas: 1
+  admissionController:
+    enabled: true
+  metricsProvider:
+    enabled: true
+
+agents:
+  tolerations:
+    - operator: Exists

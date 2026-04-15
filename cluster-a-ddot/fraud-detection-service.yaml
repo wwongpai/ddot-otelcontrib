@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-detection-service
+  namespace: bankflow
+  labels:
+    app: fraud-detection-service
+    tags.datadoghq.com/env: otel-demo
+    tags.datadoghq.com/service: fraud-detection-ddot
+    tags.datadoghq.com/version: "1.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fraud-detection-service
+  template:
+    metadata:
+      labels:
+        app: fraud-detection-service
+        tags.datadoghq.com/env: otel-demo
+        tags.datadoghq.com/service: fraud-detection-ddot
+        tags.datadoghq.com/version: "1.0.0"
+    spec:
+      containers:
+        - name: fraud-detection-service
+          image: docker.io/wwongpai/fraud-detection-service:v6
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://$(HOST_IP):4317"
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "grpc"
+            - name: OTEL_SERVICE_NAME
+              value: "fraud-detection-ddot"
+            - name: OTEL_LOGS_EXPORTER
+              value: "otlp"
+            - name: OTEL_METRICS_EXPORTER
+              value: "otlp"
+            - name: OTEL_TRACES_EXPORTER
+              value: "otlp"
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment=otel-demo,service.version=1.0.0,team=platform"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-detection-service
+  namespace: bankflow
+spec:
+  type: ClusterIP
+  selector:
+    app: fraud-detection-service
+  ports:
+    - port: 3000
+      targetPort: 3000

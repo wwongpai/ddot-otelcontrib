@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- The OTel Java agent instruments Logback at runtime to export logs via
+         OTLP — no compile-time appender dependency needed. This file just
+         configures the console appender with trace/span correlation MDC. -->
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>[%d{HH:mm:ss}] %-5level %logger{36} trace_id=%X{trace_id} span_id=%X{span_id} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="account-service"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <logger name="org.springframework" level="WARN"/>
+    <logger name="org.springframework.web.servlet.DispatcherServlet" level="INFO"/>
+    <logger name="com.bankflow" level="INFO"/>
+
+</configuration>

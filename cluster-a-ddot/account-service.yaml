@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: account-service
+  namespace: bankflow
+  labels:
+    app: account-service
+    tags.datadoghq.com/env: otel-demo
+    tags.datadoghq.com/service: account-service-ddot
+    tags.datadoghq.com/version: "1.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: account-service
+  template:
+    metadata:
+      labels:
+        app: account-service
+        tags.datadoghq.com/env: otel-demo
+        tags.datadoghq.com/service: account-service-ddot
+        tags.datadoghq.com/version: "1.0.0"
+    spec:
+      containers:
+        - name: account-service
+          image: docker.io/wwongpai/account-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://$(HOST_IP):4317"
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "grpc"
+            - name: OTEL_SERVICE_NAME
+              value: "account-service-ddot"
+            - name: OTEL_LOGS_EXPORTER
+              value: "otlp"
+            - name: OTEL_METRICS_EXPORTER
+              value: "otlp"
+            - name: OTEL_TRACES_EXPORTER
+              value: "otlp"
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "deployment.environment=otel-demo,service.version=1.0.0,team=platform"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          # startupProbe gives Spring Boot + OTel javaagent up to 150s to start
+          # before liveness/readiness kick in (observed ~32s in practice).
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-service
+  namespace: bankflow
+spec:
+  type: ClusterIP
+  selector:
+    app: account-service
+  ports:
+    - port: 8080
+      targetPort: 8080

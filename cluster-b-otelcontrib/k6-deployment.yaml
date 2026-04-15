@@ -1,0 +1,183 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-script
+  namespace: bankflow
+data:
+  script.js: |
+    import http from 'k6/http';
+    import { sleep, check, group } from 'k6';
+    import { randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
+
+    export const options = {
+      vus: 5,
+      duration: '999h',
+    };
+
+    const ACCOUNT_URL = __ENV.TARGET_URL || 'http://account-service:8080';
+    const TXN_URL = 'http://transaction-service:8080';
+    const FRAUD_URL = 'http://fraud-detection-service:3000';
+    const NOTIFY_URL = 'http://notification-service:8080';
+
+    const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } };
+
+    const accounts = ['ACC001', 'ACC002', 'ACC003', 'ACC004', 'ACC005'];
+    const invalidAccounts = ['ACC999', 'INVALID', 'NOTEXIST', 'DROP_TABLE', ''];
+
+    function pick(arr) { return arr[randomIntBetween(0, arr.length - 1)]; }
+    function pickValid() { return pick(accounts); }
+    function pickInvalid() { return pick(invalidAccounts); }
+    function differentAccount(from) {
+      let to = pickValid();
+      while (to === from) to = pickValid();
+      return to;
+    }
+
+    export default function () {
+      const roll = Math.random();
+
+      if (roll < 0.40) {
+        group('happy_transfer', function () {
+          const from = pickValid();
+          const to = differentAccount(from);
+          const payload = JSON.stringify({
+            fromAccount: from, toAccount: to,
+            amount: randomIntBetween(100, 30000), currency: 'THB',
+          });
+          const res = http.post(`${ACCOUNT_URL}/transfer`, payload, JSON_HEADERS);
+          check(res, { 'transfer ok': (r) => r.status < 500 });
+        });
+      } else if (roll < 0.50) {
+        group('balance_lookup', function () {
+          const id = Math.random() < 0.3 ? pickInvalid() : pickValid();
+          http.get(`${ACCOUNT_URL}/accounts/${id}/balance`);
+        });
+      } else if (roll < 0.58) {
+        group('error_invalid_account', function () {
+          const payload = JSON.stringify({
+            fromAccount: pickInvalid(), toAccount: pickValid(),
+            amount: randomIntBetween(500, 5000), currency: 'THB',
+          });
+          http.post(`${ACCOUNT_URL}/transfer`, payload, JSON_HEADERS);
+        });
+      } else if (roll < 0.65) {
+        group('error_negative_amount', function () {
+          const payload = JSON.stringify({
+            fromAccount: pickValid(), toAccount: differentAccount(pickValid()),
+            amount: Math.random() < 0.5 ? -500 : 0, currency: 'THB',
+          });
+          http.post(`${ACCOUNT_URL}/transfer`, payload, JSON_HEADERS);
+        });
+      } else if (roll < 0.70) {
+        group('error_malformed_json', function () {
+          const badPayloads = [
+            '{fromAccount: broken}',
+            '{"amount": "not_a_number", "fromAccount": "ACC001"}',
+            '',
+            'null',
+            '{"fromAccount":"ACC001","toAccount":"ACC002",}',
+          ];
+          http.post(`${ACCOUNT_URL}/transfer`, pick(badPayloads), JSON_HEADERS);
+        });
+      } else if (roll < 0.75) {
+        group('error_wrong_content_type', function () {
+          http.post(`${ACCOUNT_URL}/transfer`,
+            'fromAccount=ACC001&toAccount=ACC002&amount=1000',
+            { headers: { 'Content-Type': 'text/plain' } }
+          );
+        });
+      } else if (roll < 0.80) {
+        group('error_not_found_endpoint', function () {
+          const badPaths = [
+            `${ACCOUNT_URL}/api/v2/transfer`,
+            `${ACCOUNT_URL}/accounts`,
+            `${TXN_URL}/transactions/NONEXISTENT-UUID`,
+            `${ACCOUNT_URL}/accounts/ACC001/statement`,
+            `${NOTIFY_URL}/notifications/FAKE_ACCOUNT`,
+          ];
+          http.get(pick(badPaths));
+        });
+      } else if (roll < 0.85) {
+        group('high_value_fraud_trigger', function () {
+          const payload = JSON.stringify({
+            fromAccount: pickValid(), toAccount: differentAccount(pickValid()),
+            amount: randomIntBetween(100000, 999999), currency: 'THB',
+          });
+          const res = http.post(`${ACCOUNT_URL}/transfer`, payload, JSON_HEADERS);
+          check(res, { 'high-value transfer': (r) => r.status < 500 });
+        });
+      } else if (roll < 0.90) {
+        group('direct_fraud_scoring', function () {
+          const payload = JSON.stringify({
+            transactionId: `TXN-MANUAL-${Date.now()}`,
+            fromAccount: pickValid(), toAccount: pickValid(),
+            amount: randomIntBetween(200000, 5000000), currency: 'THB',
+          });
+          http.post(`${FRAUD_URL}/score`, payload, JSON_HEADERS);
+        });
+      } else if (roll < 0.95) {
+        group('error_bad_notification', function () {
+          const badNotifications = [
+            JSON.stringify({ accountId: '', type: 'TRANSFER', message: 'test' }),
+            JSON.stringify({ type: 'UNKNOWN_TYPE', message: 'bad type' }),
+            JSON.stringify({}),
+            'not json at all',
+          ];
+          http.post(`${NOTIFY_URL}/notify`, pick(badNotifications), JSON_HEADERS);
+        });
+      } else {
+        group('burst_traffic', function () {
+          for (let i = 0; i < 10; i++) {
+            const from = pickValid();
+            const payload = JSON.stringify({
+              fromAccount: from, toAccount: differentAccount(from),
+              amount: randomIntBetween(100, 10000), currency: 'THB',
+            });
+            http.post(`${ACCOUNT_URL}/transfer`, payload, JSON_HEADERS);
+          }
+        });
+      }
+
+      sleep(randomIntBetween(1, 3));
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k6-loadgen
+  namespace: bankflow
+  labels:
+    app: k6-loadgen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k6-loadgen
+  template:
+    metadata:
+      labels:
+        app: k6-loadgen
+    spec:
+      containers:
+        - name: k6
+          image: grafana/k6:latest
+          args:
+            - run
+            - /scripts/script.js
+          env:
+            - name: TARGET_URL
+              value: "http://account-service:8080"
+          volumeMounts:
+            - name: k6-script
+              mountPath: /scripts
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: k6-script
+          configMap:
+            name: k6-script

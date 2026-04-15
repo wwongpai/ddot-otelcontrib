@@ -1,0 +1,65 @@
+mode: deployment
+replicaCount: 1
+image:
+  repository: otel/opentelemetry-collector-contrib
+
+presets:
+  clusterMetrics:
+    enabled: true
+  kubernetesEvents:
+    enabled: true
+  kubernetesAttributes:
+    enabled: false  # Not needed for cluster-level receivers
+
+extraEnvs:
+  - name: DD_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: datadog-secret
+        key: DD_API_KEY
+
+config:
+  processors:
+    batch:
+      timeout: 10s
+    memory_limiter:
+      limit_mib: 256
+      check_interval: 5s
+    resourcedetection:
+      detectors: [gcp, env, system]
+      timeout: 5s
+
+  extensions:
+    datadog:
+      api:
+        key: ${env:DD_API_KEY}
+        site: datadoghq.com
+      deployment_type: gateway
+
+  exporters:
+    datadog:
+      api:
+        key: ${env:DD_API_KEY}
+        site: datadoghq.com
+      host_metadata:
+        enabled: false  # Only DaemonSet should report host metadata
+
+  service:
+    extensions: [health_check, datadog]
+    pipelines:
+      metrics:
+        receivers: [k8s_cluster]
+        processors: [memory_limiter, resourcedetection, batch]
+        exporters: [datadog]
+      logs:
+        receivers: [k8sobjects]
+        processors: [memory_limiter, batch]
+        exporters: [datadog]
+
+resources:
+  limits:
+    memory: 512Mi
+    cpu: 500m
+  requests:
+    memory: 128Mi
+    cpu: 100m
