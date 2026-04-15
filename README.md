@@ -9,49 +9,56 @@ BankFlow is a polyglot banking microservices demo that showcases Datadog's first
 ## Architecture
 
 ```
-+-------------------------------------------------------------------------+
-|  Cluster A - warach-otel-sdk-ddot                                       |
-|                                                                         |
-|  +-------------+    +--------------------+    +-------------------+     |
-|  |  k6 Load    |---▶|  account-service   |---▶|transaction-service|     |
-|  |  Generator  |    |  (Java/OTel SDK)   |    |  (Go/OTel SDK)    |     |
-|  +-------------+    +--------------------+    +---------+---------+     |
-|                                                         |               |
-|                      +---------------------+  +---------▼---------+     |
-|                      |notification-service |  |fraud-detection-svc|     |
-|                      |  (Java/OTel SDK)    |  |  (Node.js/OTel)   |     |
-|                      +---------------------+  +-------------------+     |
-|                                                                         |
-|  OTLP (gRPC) via hostIP:4317                                           |
-|  +------------------------------------------------------------------+   |
-|  |  Datadog Agent DaemonSet (DDOT Collector built-in)               |   |
-|  |  + Datadog Cluster Agent                                          |   |
-|  +--------------------------------+---------------------------------+   |
-+-----------------------------------|---------------------------------+---+
-                                    | HTTPS
-                                    ▼
-                           +------------------+
-                           |    Datadog       |
-                           |  (datadoghq.com) |
-                           +--------+---------+
-                                    | HTTPS
-+-----------------------------------|---------------------------------+---+
-|  Cluster B - warach-otel-sdk-otelcontrib                                |
-|                                   |                                     |
-|  +---------------------------------▼-------------------------------+     |
-|  |  OTel Collector Contrib DaemonSet                              |     |
-|  |  (OTLP recv + logs + kubelet + host metrics)                   |     |
-|  +----------------------------------------------------------------+     |
-|  +----------------------------------------------------------------+     |
-|  |  OTel Collector Contrib Deployment                             |     |
-|  |  (k8s_cluster + k8sobjects)                                    |     |
-|  +----------------------------------------------------------------+     |
-|                                                                         |
-|  +-------------+    +--------------------+    +-------------------+     |
-|  |  k6 Load    |---▶|  account-service   |---▶|transaction-service|     |
-|  |  Generator  |    |  (Java/OTel SDK)   |    |  (Go/OTel SDK)    |     |
-|  +-------------+    +--------------------+    +-------------------+     |
-+-------------------------------------------------------------------------+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Cluster A — warach-otel-sdk-ddot                                           │
+│                                                                             │
+│  ┌───────────┐     ┌──────────────────┐     ┌──────────────────────┐       │
+│  │  k6 Load  │────▶│  account-service │────▶│  transaction-service │       │
+│  │ Generator │     │  (Java/OTel SDK) │     │    (Go/OTel SDK)     │       │
+│  └───────────┘     └──────────────────┘     └──────────┬───────────┘       │
+│                                                ┌───────┴────────┐          │
+│                    ┌──────────────────────┐    │                │          │
+│                    │ notification-service │◀───┤  fraud-detect  │          │
+│                    │  (Java/OTel SDK)     │    │ (Python/OTel)  │          │
+│                    └──────────────────────┘    └────────────────┘          │
+│                                                                             │
+│   All services ──OTLP gRPC──▶ hostIP:4317                                  │
+│  ┌────────────────────────────────────────────────────────────────────┐     │
+│  │  Datadog Agent DaemonSet  (DDOT Collector + system-probe + APM)   │     │
+│  │  + Datadog Cluster Agent  (K8s metadata, orchestrator explorer)    │     │
+│  └───────────────────────────────┬────────────────────────────────────┘     │
+└──────────────────────────────────┼──────────────────────────────────────────┘
+                                   │ HTTPS
+                                   ▼
+                          ┌─────────────────┐
+                          │     Datadog     │
+                          │ (datadoghq.com) │
+                          └────────┬────────┘
+                                   │ HTTPS
+┌──────────────────────────────────┼──────────────────────────────────────────┐
+│  Cluster B — warach-otel-sdk-otelcontrib                                    │
+│                                  │                                          │
+│  ┌───────────────────────────────┴──────────────────────────────────────┐   │
+│  │  OTel Collector Contrib DaemonSet  (+datadog extension)             │   │
+│  │  OTLP receiver ∙ filelog ∙ kubeletstats ∙ hostmetrics              │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │  OTel Collector Contrib Deployment  (+datadog extension)            │   │
+│  │  k8s_cluster receiver ∙ k8sobjects receiver                        │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  ┌───────────┐     ┌──────────────────┐     ┌──────────────────────┐       │
+│  │  k6 Load  │────▶│  account-service │────▶│  transaction-service │       │
+│  │ Generator │     │  (Java/OTel SDK) │     │    (Go/OTel SDK)     │       │
+│  └───────────┘     └──────────────────┘     └──────────┬───────────┘       │
+│                                                ┌───────┴────────┐          │
+│                    ┌──────────────────────┐    │                │          │
+│                    │ notification-service │◀───┤  fraud-detect  │          │
+│                    │  (Java/OTel SDK)     │    │ (Python/OTel)  │          │
+│                    └──────────────────────┘    └────────────────┘          │
+│                                                                             │
+│   All services ──OTLP gRPC──▶ hostIP:4317                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -66,7 +73,7 @@ BankFlow is a polyglot banking microservices demo that showcases Datadog's first
 | `gcloud` | any recent | for GKE auth |
 | Java / Maven | 21 / 3.9+ | for account-service and notification-service |
 | Go | 1.22+ | for transaction-service |
-| Node.js | 20+ | for fraud-detection-service |
+| Python | 3.12+ | for fraud-detection-service |
 
 ---
 
@@ -130,7 +137,7 @@ docker buildx create --use
 | Live Processes            | YES              | NO                       |
 | USM (Service Monitoring)  | YES              | NO                       |
 | K8s Explorer              | YES              | NO                       |
-| Fleet Automation          | YES              | NO                       |
+| Fleet Automation          | YES              | YES (via datadog ext)    |
 | OTel Collector Contrib    | NO               | YES                      |
 
 ---
