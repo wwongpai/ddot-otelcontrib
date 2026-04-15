@@ -8,57 +8,39 @@ BankFlow is a polyglot banking microservices demo that showcases Datadog's first
 
 ## Architecture
 
+Both clusters are **independent** — they share no traffic and are not connected to each other.
+Each cluster pushes telemetry directly to the **same Datadog organization**.
+
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Cluster A — warach-otel-sdk-ddot                                           │
-│                                                                             │
-│  ┌───────────┐     ┌──────────────────┐     ┌──────────────────────┐       │
-│  │  k6 Load  │────▶│  account-service │────▶│  transaction-service │       │
-│  │ Generator │     │  (Java/OTel SDK) │     │    (Go/OTel SDK)     │       │
-│  └───────────┘     └──────────────────┘     └──────────┬───────────┘       │
-│                                                ┌───────┴────────┐          │
-│                    ┌──────────────────────┐    │                │          │
-│                    │ notification-service │◀───┤  fraud-detect  │          │
-│                    │  (Java/OTel SDK)     │    │ (Python/OTel)  │          │
-│                    └──────────────────────┘    └────────────────┘          │
-│                                                                             │
-│   All services ──OTLP gRPC──▶ hostIP:4317                                  │
-│  ┌────────────────────────────────────────────────────────────────────┐     │
-│  │  Datadog Agent DaemonSet  (DDOT Collector + system-probe + APM)   │     │
-│  │  + Datadog Cluster Agent  (K8s metadata, orchestrator explorer)    │     │
-│  └───────────────────────────────┬────────────────────────────────────┘     │
-└──────────────────────────────────┼──────────────────────────────────────────┘
-                                   │ HTTPS
-                                   ▼
-                          ┌─────────────────┐
-                          │     Datadog     │
-                          │ (datadoghq.com) │
-                          └────────┬────────┘
-                                   │ HTTPS
-┌──────────────────────────────────┼──────────────────────────────────────────┐
-│  Cluster B — warach-otel-sdk-otelcontrib                                    │
-│                                  │                                          │
-│  ┌───────────────────────────────┴──────────────────────────────────────┐   │
-│  │  OTel Collector Contrib DaemonSet  (+datadog extension)             │   │
-│  │  OTLP receiver ∙ filelog ∙ kubeletstats ∙ hostmetrics              │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │  OTel Collector Contrib Deployment  (+datadog extension)            │   │
-│  │  k8s_cluster receiver ∙ k8sobjects receiver                        │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│  ┌───────────┐     ┌──────────────────┐     ┌──────────────────────┐       │
-│  │  k6 Load  │────▶│  account-service │────▶│  transaction-service │       │
-│  │ Generator │     │  (Java/OTel SDK) │     │    (Go/OTel SDK)     │       │
-│  └───────────┘     └──────────────────┘     └──────────┬───────────┘       │
-│                                                ┌───────┴────────┐          │
-│                    ┌──────────────────────┐    │                │          │
-│                    │ notification-service │◀───┤  fraud-detect  │          │
-│                    │  (Java/OTel SDK)     │    │ (Python/OTel)  │          │
-│                    └──────────────────────┘    └────────────────┘          │
-│                                                                             │
-│   All services ──OTLP gRPC──▶ hostIP:4317                                  │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────┐   ┌──────────────────────────────────────┐
+│ Cluster A — DDOT                     │   │ Cluster B — OTel Collector Contrib   │
+│                                      │   │                                      │
+│  k6 ──▶ account-service             │   │  k6 ──▶ account-service             │
+│             │                        │   │             │                        │
+│             ▼                        │   │             ▼                        │
+│     transaction-service              │   │     transaction-service              │
+│         │         │                  │   │         │         │                  │
+│         ▼         ▼                  │   │         ▼         ▼                  │
+│  fraud-detect  notification          │   │  fraud-detect  notification          │
+│  (Python)      (Java)                │   │  (Python)      (Java)                │
+│                                      │   │                                      │
+│  All services ─OTLP─▶ hostIP:4317   │   │  All services ─OTLP─▶ hostIP:4317   │
+│                                      │   │                                      │
+│ ┌──────────────────────────────────┐ │   │ ┌──────────────────────────────────┐ │
+│ │ Datadog Agent DaemonSet         │ │   │ │ OTel Collector Contrib DaemonSet │ │
+│ │ (DDOT + system-probe + APM)     │ │   │ │ (OTLP + filelog + kubeletstats) │ │
+│ └──────────────┬───────────────────┘ │   │ └──────────────┬───────────────────┘ │
+│ ┌──────────────┴───────────────────┐ │   │ ┌──────────────┴───────────────────┐ │
+│ │ Datadog Cluster Agent           │ │   │ │ OTel Collector Contrib Deployment│ │
+│ │ (K8s metadata, orchestrator)    │ │   │ │ (k8s_cluster + k8sobjects)      │ │
+│ └──────────────┬───────────────────┘ │   │ └──────────────┬───────────────────┘ │
+└────────────────┼─────────────────────┘   └────────────────┼─────────────────────┘
+                 │                                          │
+                 │           ┌─────────────────┐            │
+                 └──────────▶│     Datadog     │◀───────────┘
+                    HTTPS    │ (datadoghq.com) │   HTTPS
+                             └─────────────────┘
+                              Same org, same env
 ```
 
 ---
